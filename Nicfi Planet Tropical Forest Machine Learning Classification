@@ -1,0 +1,129 @@
+var nicfi = ee.ImageCollection('projects/planet-nicfi/assets/basemaps/asia');
+
+// Filter basemaps by date and get the first image from filtered results
+var basemap2021= nicfi.filter(ee.Filter.date('2019-01-01','2021-04-30')).first().clip(table);
+var vis = {"bands":["N","R","G"],"min":64,"max":15000,"gamma":2.1};
+
+Map.addLayer(basemap2021, vis, '2021-03 mosaic');
+// Filter basemaps by date and get the first image from filtered results
+// var basemap2017= nicfi.filter(ee.Filter.date('2017-01-01','2017-07-01')).median();
+
+          // var ndvi2017 = basemap2017.normalizedDifference(['N','R']).rename('NDVI')
+          // var change = ndvi2021.subtract(ndvi2017);
+          //Map.addLayer(ndvi2021,{min:-1,max:1,palette:['darkred','orange','yellow','lightgreen','green','darkgreen']},'change')
+          // Map.setCenter(107, 10, 4);
+
+          // var vis = {"bands":["N","G","B"],"min":64,"max":5454,"gamma"};
+
+          // Map.addLayer(basemap, vis, '2021-03 mosaic');
+          // Map.addLayer(
+          //     basemap.normalizedDifference(['N','R']).rename('NDVI'),
+          //     {min:-0.55,max:0.8,palette: [
+          //         '8bc4f9', 'c9995c', 'c7d270','8add60','097210'
+          //     ]}, 'NDVI', false);
+var landsatCollection = ee.ImageCollection('LANDSAT/LC08/C01/T1')
+    .filterDate('2019-01-01', '2021-08-31');
+
+// Make a cloud-free composite.
+var composite = ee.Algorithms.Landsat.simpleComposite({
+  collection: landsatCollection,
+  asFloat: true
+});
+//var compositeClip = composite.clip(table);
+var compositeclip = composite.clip(table);
+
+// Show Layer to select training data
+Map.addLayer(compositeclip ,{min:0, max:0.3, bands:['B5','B6','B7']},'composite');
+
+
+var addEVI = function (basemap2021) {
+  var evi = basemap2021.expression('2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))', {
+    'NIR' : basemap2021.select('N'),
+    'RED' : basemap2021.select('R'),
+    'BLUE': basemap2021.select('B')
+  }).float();
+  return basemap2021.addBands(evi.rename('EVI'));
+};
+var addSAVI = function (basemap2021) {
+  // Add Soil Adjust Vegetation Index (SAVI)
+    // using L = 0.5;
+    var savi = basemap2021.expression('(NIR - RED) * (1 + 0.5)/(NIR + RED + 0.5)', {
+    'NIR': basemap2021.select('N'),
+    'RED': basemap2021.select('R')
+    }).float();
+    return basemap2021.addBands(savi.rename('SAVI'));
+};
+var addNDVI = function (basemap2021) {
+  // Add Soil Adjust Vegetation Index (SAVI)
+    // using L = 0.5;
+    var ndvi = basemap2021.expression('(NIR - RED)/(NIR + RED)', {
+    'NIR': basemap2021.select('N'),
+    'RED': basemap2021.select('R')
+    }).float();
+    return basemap2021.addBands(ndvi.rename('NDVI'));
+};
+var addVI = function (basemap2021) {
+  // Add Soil Adjust Vegetation Index (SAVI)
+    // using L = 0.5;
+    var VI = basemap2021.expression('(R + G + B)/3', {
+    'R': basemap2021.select('R'),
+    'G': basemap2021.select('G'),
+    'B': basemap2021.select('B')
+    }).float();
+    return basemap2021.addBands(VI.rename('VI'));
+};
+
+basemap2021 = addVI(basemap2021);
+basemap2021 = addEVI(basemap2021);
+basemap2021 = addSAVI(basemap2021);
+basemap2021 = addNDVI(basemap2021);
+
+// Merge the three geometry layers into a single FeatureCollection.
+var newfc = Urban.merge(Cropland).merge(Bareland).merge(Forest).merge(Cloud).merge(mangrove)
+
+// Use these bands for classification.
+var bands = ['N', 'R', 'G', 'B', 'NDVI', 'EVI', 'SAVI', 'VI'];
+// The name of the property on the points storing the class label.
+var classProperty = 'Landcover';
+
+// Sample the composite to generate training data.  Note that the
+// class label is stored in the 'landcover' property.
+
+var training = basemap2021.select(bands).sampleRegions({
+  collection: newfc,
+  properties: [classProperty],
+  scale: 5
+});
+
+var classifier = ee.Classifier.smileRandomForest({numberOfTrees:1000}).train(training,"Landcover",bands);
+  
+// Print some info about the classifier (specific to CART).
+print('CART, explained', classifier.explain());
+//
+// Classify the composite.
+var classified = basemap2021.classify(classifier);
+Map.centerObject(table);
+Map.addLayer(classified, {min: 0, max: 5, palette: ['red', 'green', 'yellow', 'blue', 'black', 'black']});
+
+// var bandNames = basemap2021.bandNames();
+// // print(bandNames)
+// //#10 Membuat model parameterisasi klasifikasi
+// var classifier = ee.Classifier.smileRandomForest({numberOfTrees:1000}).train(training,"Id",bandNames);
+ 
+// //#11 Mengklasifikasikan citra menggunakan model yang sudah dibuat 
+// var classification2020 = basemap2021.classify(classifier);
+// // Map.addLayer(filter.select(['IBI']),{palette:['black','yellow','red'],min:0,max:1},'IBI')
+
+// Map.addLayer(classification2020, {min: 0, max: 3, palette: ['red', 'green', 'yellow', 'blue']});
+
+
+
+//['B2','B3','B4','B5','B6','B7','B8','B12','B11','elevation','slope','aspect','eastness','northness','EVI','SAVI','IBI','LST']
+Export.image.toDrive({
+  image: classified,
+  folder:'Aru-LandDataset30',
+  description: 'LorangLC',
+  scale: 5,
+  region: table,
+  maxPixels: 1e12
+})
