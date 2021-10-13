@@ -127,3 +127,4 @@ Export.image.toDrive({
   region: table,
   maxPixels: 1e12
 })
+*.html linguist-detectable=false
